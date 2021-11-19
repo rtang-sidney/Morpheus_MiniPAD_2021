@@ -6,6 +6,7 @@ class DataFile:
     # PATTERN_HEADER = re.compile(r"\**\sDATA\s\**")
     PATTERN_POINTS = re.compile(r"([0-9]*)\sPoints")
     PATTERN_SCAN = re.compile(r"Scanning Variables:\s(tti[1-2]_out[1-2]),\sSteps:\s([1-9]*.*[1-9]*)")
+    PATTERN_CURRENTS = re.compile(r"(tti[1-2]_out[1-2])\s*=\s*([1-9]*.*[1-9]*)")
 
     DATA_HEADER = "**************************** DATA ******************************************\n"
     SCANNING_VARIABLE_KEY = "Scanning Variables"
@@ -13,8 +14,11 @@ class DataFile:
     NORMED_DETECTOR_WAVELENGTH = 1.8e-10  # m
     INCIDENT_WAVE_VECTOR = 1.4e10  # m-1
 
+    FOLDER = "../20210907/"
     FILE_PREFIX = 'morpheus2021n'
     FILE_FORMAT = '.dat'
+
+    POWER_SUPPLY_PREFIX = "tti"
 
     PARAMETER_SUFFIX = '_value'
     DATA_START = 'Scan data'
@@ -31,6 +35,13 @@ class DataFile:
     COIL_I2 = 'tti2_out1'
     COIL_O1 = 'tti2_out2'
     CHANNELS = [COIL_I1, COIL_O1, COIL_I2, COIL_O2]
+
+    CURRENT_O2 = np.NAN
+    CURRENT_I1 = np.NAN
+    CURRENT_I2 = np.NAN
+    CURRENT_O1 = np.NAN
+    CURRENTS = [CURRENT_I1, CURRENT_O1, CURRENT_I2, CURRENT_O2]
+    COILS_CURRENTS = dict(zip(CHANNELS, CURRENTS))
 
     I1_POSITION = 'upstream, inner'
     O1_POSITION = 'upstream, outer'
@@ -71,7 +82,7 @@ class DataFile:
 
     def __init__(self, file_index):
         self.complete_scan = True
-        self.filename = self.FILE_PREFIX + "{:0>6d}".format(file_index) + self.FILE_FORMAT
+        self.filename = self.FOLDER + self.FILE_PREFIX + "{:0>6d}".format(file_index) + self.FILE_FORMAT
         # print(self.filename)
         f = open(self.filename, 'r')
         lines = f.readlines()
@@ -86,15 +97,26 @@ class DataFile:
             if re.match(self.PATTERN_POINTS, line):
                 point_number = re.search(self.PATTERN_POINTS, line).groups()[0]
                 point_number = int(point_number)
-                # print(point_number)
+            if re.match(self.PATTERN_CURRENTS, line):
+                # print(line)
+                channel, current = re.search(self.PATTERN_CURRENTS, line).groups()
+                if channel in self.CHANNELS:
+                    # print(channel, current)
+                    self.COILS_CURRENTS[channel] = float(current)
+
             if self.SCANNING_VARIABLE_KEY in line:
                 self.scan_name, self.scan_step = re.search(self.PATTERN_SCAN, line).groups()
                 self.scan_step = float(self.scan_step)
-        if self.scan_name:
-            # print(self.scan_name)
-            pass
+        if self.scan_name == self.COIL_O1:
+            self.pairing_coil = self.COIL_O2
+        elif self.scan_name == self.COIL_O2:
+            self.pairing_coil = self.COIL_O1
+        elif self.scan_name == self.COIL_I1:
+            self.pairing_coil = self.COIL_I2
+        elif self.scan_name == self.COIL_I2:
+            self.pairing_coil = self.COIL_I1
         else:
-            raise ValueError("Failed to find the scan name.")
+            raise RuntimeError("Invalid scan name captured: {}".format(self.scan_name))
 
         if point_number > 0:
             try:
@@ -108,155 +130,3 @@ class DataFile:
                 self.complete_scan = False
         else:
             raise ValueError("Failed to find the number of scanned points.")
-
-        # print(self.scan_x, self.scan_count)
-        # print(lines)
-        # print()
-        #
-        # # reads only the data part of a file
-        # # x-axis	timer	mon1	mon2	ctr1    ctr2
-        # try:
-        #     data = np.loadtxt(self.filename, comments='#')
-        #
-        #     if data.ndim == 2:
-        #         self.data_2d_array = True
-        #         self.x_data = data[:, 0]
-        #         counts = data[:, -2]
-        #         monitor = data[:, -3]
-        #         self.real_counts = counts / (self._normalised_counts() * monitor)
-        #         self.real_counts = np.int_(self.real_counts)
-        #         self.intensity_error = np.sqrt(counts + counts ** 2 / monitor) / (self._normalised_counts() * monitor)
-        #         self._raw_data_correction()
-        #         self.scan_name = ''
-        #         self.x_label = ''
-        #         self.y_label = self.PLOT_Y_LABEL
-        #
-        #         self.__properties = {}
-        #         self.properties_sorted = {}
-        #     else:
-        #         self.data_2d_array = False
-        # except UserWarning:
-        #     self.data_2d_array = False
-
-    def _raw_data_correction(self):
-        error = 1e-3
-        data_length = self.x_data.shape[0]
-        delete_index = []
-        for i in range(data_length):
-            # one point was shifted to the next
-            if 0 < i < data_length - 2 and self.x_data[i] > self.x_data[i - 1] and abs(
-                    self.x_data[i] - self.x_data[i + 1]) < error:
-                self.x_data[i] = (self.x_data[i - 1] + self.x_data[i + 1]) / 2.0
-            # zero count
-            if int(self.real_counts[i]) == 0:
-                delete_index.append(i)
-
-        self.x_data = np.delete(self.x_data, delete_index)
-        self.real_counts = np.delete(self.real_counts, delete_index)
-        # self.monitor = np.delete(self.monitor, delete_index)
-        if self.x_data.shape[0] == 0:
-            self.data_2d_array = False
-        else:
-            # first point was shifted to another position
-            if self.x_data[0] > self.x_data[1]:
-                self.x_data[0] = 0
-
-    @staticmethod
-    def _unit_correction(unit):
-        if unit == 'A':
-            pass
-        else:
-            unit = 'A'
-        return unit
-
-    def _normalised_counts(self):
-        wavelength = 2 * np.pi / float(self.INCIDENT_WAVE_VECTOR)
-        flux = wavelength / (self.NORMED_DETECTOR_EFFICIENCY * self.NORMED_DETECTOR_WAVELENGTH)
-        return flux
-
-    def parse_header(self, data_line):
-        # parses a pair of floats: "($float, $float)"
-        def slit_matcher(s):
-            regex = r'\(\s*([-+]?[0-9]*\.?[0-9]*)\s*,\s*([-+]?[0-9]*\.?[0-9]*\s*)\)\s*' \
-                    r'(\s*[-+]?[0-9]*\.?[0-9]*)\s*x\s*([-+]?[0-9]*\.?[0-9]*)\s*'
-            try:
-                match = re.search(regex, s, re.IGNORECASE)
-                return list(map(float, [match.group(1), match.group(2), match.group(3), match.group(4)]))
-            except TypeError:
-                print("Wrong data type of pair matching")
-            except:
-                print("Function does not work: slit_matcher")
-
-        # parses a float, returns the first float from the left, anything else is ignored
-        def float_matcher(s):
-            regex = r'\s*([-+]?[0-9]*\.?[0-9]*)\s*'
-            try:
-                match = re.search(regex, s, re.IGNORECASE)
-                return float(match.group(1))
-            except TypeError:
-                print("Wrong data type of float matching")
-            except OSError:
-                pass
-
-        # only the lines with colon in between are needed
-        if ':' in data_line:
-            # seems like we have a meta-data in the form "key : value"
-            # we have to be careful, since raw_data can have multiple entries (more than 2), because
-            # somebody thought it is a good idea to have a separator in the data section..
-            # for example: "ms2_status : ok: left_idle ...
-            key, value = list(map(lambda s: s.strip(), data_line[1:].split(':', maxsplit=1)))
-            if self.PARAMETER_SUFFIX in key:
-                key = key.replace(self.PARAMETER_SUFFIX, '')
-                if key in self.NORMAL_FLOAT_VALUES:
-                    value = float_matcher(value)
-                    return key, value
-                if key in self.SLITs:
-                    values = slit_matcher(value)
-                    slit_infos = list(map(lambda s: key + '_' + s, self.SLIT_INFOs))
-                    return slit_infos, values
-            elif self.COUNT_TIME in key or self.SCAN_INFO in key:
-                return key, value
-
-    def scan_variable_getter(self, line1, line2):
-        self.scan_name, unit = list(map(lambda s: s.split()[1], (line1, line2)))
-        if self.scan_name in self.CHANNELS:
-            plot_name = self.COILs_POSITIONs[self.scan_name]
-            unit = self._unit_correction(unit)
-            self.x_label = r'Current $I_{\mathrm{%s}}$ (%s)' % (plot_name, unit)
-        else:
-            self.x_label = self.scan_name + ' (' + unit + ')'
-        return self.scan_name
-
-    # grabs __properties from a file that are encoded in the form of "key: value"
-    # Reforming realised by means of parsing funcs
-    def _property_getter(self):
-        f = open(self.filename, "r")
-        lines = f.readlines()
-        f.close()
-
-        scan_key = None
-        for line in lines:
-            if line.startswith('#'):
-                if line.startswith('###'):
-                    if self.DATA_START in line:
-                        data_start_index = lines.index(line)
-                        scan_key = self.scan_variable_getter(lines[data_start_index + 1], lines[data_start_index + 2])
-                try:
-                    key, value = self.parse_header(line)
-                except:
-                    continue
-                if isinstance(key, str):
-                    self.__properties.update({key: value})
-                elif isinstance(key, list):
-                    self.__properties.update(dict(zip(key, value)))
-                # except ValueError:
-                #     print(self._parse_header(line))
-        self.__properties[scan_key] = 'Scanned'
-
-    def property_sort(self):
-        self._property_getter()
-        for key in self.INFOS_NEEDED:
-            try:
-                self.properties_sorted.update({key: self.__properties[key]})
-            except KeyError:  # for optional infos
-                self.properties_sorted.update({key: 'Unused'})
