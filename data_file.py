@@ -14,7 +14,7 @@ class DataFile:
     NORMED_DETECTOR_WAVELENGTH = 1.8e-10  # m
     INCIDENT_WAVE_VECTOR = 1.4e10  # m-1
 
-    FOLDER = "../20210907/"
+    FOLDER = "../MorpheusData/"
     FILE_PREFIX = 'morpheus2021n'
     FILE_FORMAT = '.dat'
 
@@ -108,13 +108,13 @@ class DataFile:
                 self.scan_name, self.scan_step = re.search(self.PATTERN_SCAN, line).groups()
                 self.scan_step = float(self.scan_step)
         if self.scan_name == self.COIL_O1:
-            self.pairing_coil = self.COIL_O2
+            self.pair_coil = self.COIL_O2
         elif self.scan_name == self.COIL_O2:
-            self.pairing_coil = self.COIL_O1
+            self.pair_coil = self.COIL_O1
         elif self.scan_name == self.COIL_I1:
-            self.pairing_coil = self.COIL_I2
+            self.pair_coil = self.COIL_I2
         elif self.scan_name == self.COIL_I2:
-            self.pairing_coil = self.COIL_I1
+            self.pair_coil = self.COIL_I1
         else:
             raise RuntimeError("Invalid scan name captured: {}".format(self.scan_name))
 
