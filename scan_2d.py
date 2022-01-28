@@ -17,27 +17,29 @@ def sine_func_1d(current, amp, para_coil, phase, y_shift):
     return -amp * np.cos(-para_coil * current + phase) + y_shift
 
 
-def sine_func_2d(current1, current2, amp, para_coil1, para_coil2, delta_i, delta_f, shift1, shift2,  # phase_shift,
+def sine_func_2d(current1, current2, amp, para_coil1, para_coil2, delta_i, delta_f, shift1, shift2, phase_shift,
                  y_shift):
     # minus sein before c because the two coils are in the opposite direction
     # return amp * np.cos(para_coil1 * (current1 + shift1) - para_coil2 * (current2 + shift2) - (
     #         delta_i - delta_f)) + y_shift  # + phase_shift
-    return amp * np.cos(para_coil1 * (current1) + shift1 - para_coil2 * (current2 + shift2) - (
-            delta_i - delta_f)) + y_shift  # + phase_shift
+    return -amp * np.cos(para_coil1 * (current1 + shift1) - para_coil2 * (current2 + shift2) + phase_shift + (
+            delta_i - delta_f)) + y_shift
 
 
-def phase2current(coil_name, precession_phase, para_coil1=None, para_coil2=None, shift1=None, shift2=None):
+def phase2current(coil_name, precession_phase, shift, para_coil1=None, para_coil2=None, shift1=None, shift2=None):
+    if precession_phase == 0:
+        return 0
     if coil_name == univ.COILS_POSITIONS[univ.COIL_I1]:
         if para_coil1 is None or shift1 is None:
             raise ValueError("The parameters for Coil I1 are invalid.")
         else:
-            current1 = precession_phase / para_coil1 - shift1
+            current1 = (precession_phase - shift / 2.0) / para_coil1 - shift1
             return current1
     elif coil_name == univ.COILS_POSITIONS[univ.COIL_I2]:
         if para_coil2 is None or shift2 is None:
             raise ValueError("The parameters for Coil I2 are invalid.")
         else:
-            current2 = -precession_phase / para_coil2 - shift2
+            current2 = -(precession_phase - shift / 2.0) / para_coil2 - shift2
             return current2
     else:
         raise ValueError("Invalid coil name {:s}".format(coil_name))
@@ -72,8 +74,10 @@ def lm_fit_1d(xdata, ydata):
                              min=(np.max(ydata) - np.min(ydata)) / 2.5, max=(np.max(ydata) - np.min(ydata)) / 1.5)
     fmodel_1d.set_param_hint('para_coil', value=np.pi / 2.5, min=np.pi / 3.5, max=np.pi / 2)
     fmodel_1d.set_param_hint('phase', value=0, min=- np.pi, max=np.pi)
-    fmodel_1d.set_param_hint('y_shift', value=(np.max(ydata) + np.min(ydata)) / 2.0,
-                             min=(np.max(ydata) + np.min(ydata)) / 2.5, max=(np.max(ydata) + np.min(ydata)) / 1.5)
+    fmodel_1d.set_param_hint('y_shift', value=(np.max(ydata) + np.min(ydata)) / 2.0, min=np.min(ydata),
+                             max=np.max(ydata))
+    fmodel.set_param_hint('delta_i', value=delta_i, vary=False)
+    fmodel.set_param_hint('delta_f', value=delta_f, vary=False)
     params = fmodel_1d.make_params()
     result = fmodel_1d.fit(ydata, params, current=xdata)
     return result.params["amp"].value, result.params["para_coil"].value, result.params["phase"].value, result.params[
@@ -88,16 +92,26 @@ def lm_fit_2d(xdata1, xdata2, ydata, delta_i, delta_f):
     fmodel.set_param_hint('para_coil2', value=np.pi / 2.5, min=np.pi / 3.5, max=np.pi / 2)
     fmodel.set_param_hint('delta_i', value=delta_i, vary=False)
     fmodel.set_param_hint('delta_f', value=delta_f, vary=False)
-    fmodel.set_param_hint('shift1', value=0, min=-0.5 * np.pi, max=0.5 * np.pi)  # min=-0.5, max=0.5
-    fmodel.set_param_hint('shift2', value=0, vary=False)  # min=-0.5, max=0.5
-    # fmodel.set_param_hint('phase_shift', value=0, min=-np.pi, max=np.pi)
+    fmodel.set_param_hint('shift1', value=0, vary=False, min=-0.05, max=0.05)
+    fmodel.set_param_hint('shift2', value=0, vary=False, min=-0.05, max=0.05)
+    fmodel.set_param_hint('phase_shift', value=0, min=-0.2 * np.pi, max=0.2 * np.pi)
     fmodel.set_param_hint('y_shift', value=(np.max(ydata) + np.min(ydata)) / 2.0, min=np.min(ydata), max=np.max(ydata))
     params = fmodel.make_params()
     result = fmodel.fit(ydata, params, current1=xdata1, current2=xdata2)
     print(result.fit_report())
     return result.params["amp"].value, result.params["para_coil1"].value, result.params["para_coil2"].value, \
            result.params["delta_i"].value, result.params["delta_f"].value, result.params["shift1"].value, result.params[
-               "shift2"].value, result.params["y_shift"].value  # , result.params["phase_shift"].value
+               "shift2"].value, result.params["phase_shift"].value, result.params["y_shift"].value
+
+
+def current_adjust(coil, period):
+    if coil < 4 - period:
+        coil += period
+    elif coil > period:
+        coil -= period
+    else:
+        pass
+    return coil
 
 
 d_spacing = 3.55e-10  # PG 002
@@ -121,6 +135,9 @@ for counter, scan_2d in enumerate(SCAN_2D):
     sine_params_1d = lm_fit_1d(data_file.scan_x, data_file.scan_count)
     counts_1dfit = sine_func_1d(data_file.scan_x, *sine_params_1d)
     pol_1dfit[counter, :] = counts2polarisation(counts_1dfit, sine_params_1d)
+    if counter == 0:
+        phase = sine_params_1d[2] - (delta_i - delta_f)
+        print(sine_params_1d, phase)
     # print(sine_params_1d, sine_params_1d[0] / sine_params_1d[-1])
 
 sine_params2d = lm_fit_2d(coil_pair, coil_scanned, counts, delta_i, delta_f)
@@ -175,9 +192,17 @@ for pi in AXES:
     for pf in AXES:
         alpha_i, beta_i, alpha_f, beta_f = polarisation2angles(pi, pf, 2 * theta)
         coil_i1 = phase2current(coil_name=univ.COILS_POSITIONS[univ.COIL_I1], precession_phase=beta_i,
-                                para_coil1=sine_params2d[1], shift1=sine_params2d[5])
+                                shift=phase_shift, para_coil1=sine_params2d[1], shift1=sine_params2d[5])
         coil_i2 = phase2current(coil_name=univ.COILS_POSITIONS[univ.COIL_I2], precession_phase=beta_f,
-                                para_coil2=sine_params2d[2], shift2=sine_params2d[6])
+                                shift=phase_shift, para_coil2=sine_params2d[2], shift2=sine_params2d[6])
+        coil_i1 = current_adjust(coil_i1, period1)
+        coil_i2 = current_adjust(coil_i2, period2)
+
+        if pi != AXIS_Z and pf != AXIS_Z:
+            count = sine_func_2d(coil_i1, coil_i2, *sine_params2d)
+            pol = counts2polarisation(count, sine_params2d)
+            print("polarisation = {:.2f}".format(pol))
+
         print(
             "pi = {:s}, pf = {:s}, coil_o1 = {:.1f}°, coil_i1 = {:.1f}° at {:.2f} A, coil_i2 = {:.1f}° at {:.2f} A, coil_o2 = {:.1f}°".format(
                 pi, pf, np.rad2deg(alpha_i), np.rad2deg(beta_i), coil_i1, np.rad2deg(beta_f), coil_i2,

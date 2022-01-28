@@ -78,6 +78,6 @@ def polarisation2angles(incoming_axis, outgoing_axis, twotheta):
                 outgoing_axis, VALID_AXES))
     alpha_i, beta_i = _angles_incoming(axis=incoming_axis, delta_i=twotheta / 2.0)
     alpha_f, beta_f = _angles_outgoing(axis=outgoing_axis, delta_f=np.pi - twotheta / 2.0)
-    alpha_f = -alpha_f
-    beta_f = -beta_f
+    alpha_f = alpha_f
+    beta_f = beta_f
     return _adjust_angle(alpha_i), _adjust_angle(beta_i), _adjust_angle(alpha_f), _adjust_angle(beta_f)
